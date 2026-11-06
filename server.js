@@ -13,7 +13,7 @@ import { GoogleGenAI } from '@google/genai';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || process.env.BACKEND_PORT || 5000;
 
 // Middleware
 app.use(cors());
@@ -114,7 +114,7 @@ const DB = {
       agencyName: 'Apex Logistics Manpower Pvt Ltd',
       assignedWarehouseId: '11111111-1111-1111-1111-111111111101',
       govtIdType: 'Aadhaar Card',
-      govtIdNumber: '7842 1923 8812',
+      govtIdNumber: '[Aadhaar Redacted]',
       dateOfJoining: '2025-01-15',
       dailyWageRate: 750.0,
       monthlyBaseSalary: 22500.0,
@@ -129,7 +129,7 @@ const DB = {
       agencyName: 'Apex Logistics Manpower Pvt Ltd',
       assignedWarehouseId: '11111111-1111-1111-1111-111111111101',
       govtIdType: 'Aadhaar Card',
-      govtIdNumber: '9102 3341 5567',
+      govtIdNumber: '[Aadhaar Redacted]',
       dateOfJoining: '2025-02-01',
       dailyWageRate: 700.0,
       monthlyBaseSalary: 21000.0,
@@ -159,7 +159,7 @@ const DB = {
       agencyName: 'Apex Logistics Manpower Pvt Ltd',
       assignedWarehouseId: '11111111-1111-1111-1111-111111111101',
       govtIdType: 'Aadhaar Card',
-      govtIdNumber: '4512 8871 2290',
+      govtIdNumber: '[Aadhaar Redacted]',
       dateOfJoining: '2025-03-10',
       dailyWageRate: 800.0,
       monthlyBaseSalary: 24000.0,
@@ -189,7 +189,7 @@ const DB = {
       agencyName: 'Apex Logistics Manpower Pvt Ltd',
       assignedWarehouseId: '11111111-1111-1111-1111-111111111101',
       govtIdType: 'Aadhaar Card',
-      govtIdNumber: '3341 9982 1012',
+      govtIdNumber: '[Aadhaar Redacted]',
       dateOfJoining: '2025-04-01',
       dailyWageRate: 650.0,
       monthlyBaseSalary: 19500.0,
@@ -199,7 +199,6 @@ const DB = {
   ],
 
   attendance: [
-    // Pre-populated records for Airtel Warehouse
     {
       id: 'att-1',
       auditorId: '22222222-2222-2222-2222-222222222201',
@@ -371,7 +370,7 @@ const DB = {
 // ----------------------------------------------------------------------------
 // AUTHENTICATION & ACCESS CONTROL (RBAC) MIDDLEWARE
 // ----------------------------------------------------------------------------
-let currentActiveUserId = '00000000-0000-0000-0000-000000000001'; // Default: Super Admin Aditya
+let currentActiveUserId = '00000000-0000-0000-0000-000000000001';
 
 const authMiddleware = (req, res, next) => {
   const customUserId = req.headers['x-user-id'] || currentActiveUserId;
@@ -424,6 +423,26 @@ if (process.env.GEMINI_API_KEY) {
     console.warn('Google GenAI initialization warning:', err.message);
   }
 }
+
+// ----------------------------------------------------------------------------
+// HEALTH & ROOT ENDPOINTS (Available for Render health checks)
+// ----------------------------------------------------------------------------
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: "Auditor's Enterprise Platform API",
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: "Auditor's Platform API",
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // ----------------------------------------------------------------------------
 // API ROUTES
@@ -547,7 +566,6 @@ app.get('/api/auditors', authMiddleware, (req, res) => {
   if (agency) list = list.filter((a) => a.agencyName === agency);
   if (status) list = list.filter((a) => a.status === status);
 
-  // Augment with warehouse names
   const augmented = list.map((aud) => {
     const wh = DB.warehouses.find((w) => w.id === aud.assignedWarehouseId);
     return {
@@ -657,7 +675,7 @@ app.post('/api/attendance/mark', authMiddleware, requireSuperAdmin, (req, res) =
   res.json({ message: 'Attendance recorded', entry });
 });
 
-// F. Dynamic Payroll Engine (Multi-date range settlement calculation)
+// F. Dynamic Payroll Engine
 app.post('/api/payroll/calculate', authMiddleware, (req, res) => {
   const { startDate, endDate, warehouseId } = req.body;
   if (!startDate || !endDate) {
@@ -667,7 +685,6 @@ app.post('/api/payroll/calculate', authMiddleware, (req, res) => {
   const activeAuditors = DB.auditors.filter((a) => !a.isDeleted && (!warehouseId || a.assignedWarehouseId === warehouseId));
 
   const payrollSummary = activeAuditors.map((auditor) => {
-    // Attendance in range
     const rangeAttendance = DB.attendance.filter(
       (att) => att.auditorId === auditor.id && att.attendanceDate >= startDate && att.attendanceDate <= endDate
     );
@@ -679,19 +696,18 @@ app.post('/api/payroll/calculate', authMiddleware, (req, res) => {
 
     const effectiveDays = presentDays + halfDays * 0.5;
     const dailyRate = Number(auditor.dailyWageRate) || 700;
-    const hourlyOtRate = (dailyRate / 8) * 1.5; // 1.5x standard hourly wage
+    const hourlyOtRate = (dailyRate / 8) * 1.5;
 
     const baseEarned = Math.round(effectiveDays * dailyRate);
     const overtimeEarned = Math.round(overtimeHours * hourlyOtRate);
     const grossPayout = baseEarned + overtimeEarned;
 
-    // Advances
     const unsettledAdvances = DB.advances
       .filter((adv) => adv.auditorId === auditor.id && !adv.isSettled)
       .reduce((sum, adv) => sum + adv.amount, 0);
 
     const advanceDeduction = Math.min(unsettledAdvances, grossPayout);
-    const statutoryDeductions = Math.round(grossPayout * 0.0); // 0% or optional TDS
+    const statutoryDeductions = Math.round(grossPayout * 0.0);
     const netPayable = grossPayout - advanceDeduction - statutoryDeductions;
 
     return {
@@ -774,7 +790,6 @@ Return ONLY raw JSON with no markdown backticks.
     let extractedRows = [];
 
     if (aiClient) {
-      // Call Gemini model with 10s timeout to prevent hanging on network/preview
       const withTimeout = (promise, ms = 10000) =>
         Promise.race([
           promise,
@@ -843,7 +858,6 @@ Return ONLY raw JSON with no markdown backticks.
         }));
       }
     } else {
-      // Intelligent fallback simulator for sandbox when API key is not yet set
       console.log('No Gemini API key detected, running high-fidelity OCR heuristic parser...');
       extractedRows = auditorsInWarehouse.slice(0, 5).map((aud, idx) => ({
         detectedName: aud.fullName,
@@ -855,7 +869,6 @@ Return ONLY raw JSON with no markdown backticks.
       }));
     }
 
-    // Cross reference against existing digital attendance to highlight discrepancies
     const reconciliation = extractedRows.map((item) => {
       const auditor = DB.auditors.find((a) => a.id === item.matchedAuditorId);
       const existingAtt = DB.attendance.find(
@@ -1045,14 +1058,20 @@ app.use((err, req, res, next) => {
   });
 });
 
-export default app;
-
-if (process.argv[1] && (process.argv[1].endsWith('backend/server.js') || process.argv[1].endsWith('backend\\server.js'))) {
-  const PORT = process.env.BACKEND_PORT || 5000;
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: "Auditor's Platform API", timestamp: new Date() });
-});  
+// ----------------------------------------------------------------------------
+// SERVER INITIALIZATION (Direct Listen on Render & Local)
+// ----------------------------------------------------------------------------
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Auditor's Enterprise Backend running on port ${PORT}`);
-  });
-}
+  console.log(`Auditor's Enterprise Backend running on port ${PORT}`);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception thrown:', err);
+  process.exit(1);
+});
+
+export default app;
