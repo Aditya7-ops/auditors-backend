@@ -666,14 +666,26 @@ app.post('/api/auditors', authMiddleware, requireSuperAdmin, (req, res) => {
   res.status(201).json({ auditor: newAuditor });
 });
 
-app.delete('/api/auditors/:id', authMiddleware, requireSuperAdmin, (req, res) => {
-  const aud = DB.auditors.find((a) => a.id === req.params.id);
-  if (!aud) return res.status(404).json({ error: 'Auditor not found' });
+// DELETE AUDITOR (Hard delete or soft delete in Supabase)
+app.delete('/api/auditors/:id', authMiddleware, requireSuperAdmin, async (req, res) => {
+  const { id } = req.params;
 
-  aud.isDeleted = true;
-  aud.deletedAt = new Date().toISOString();
-  aud.deletedBy = req.user.email;
-  res.json({ message: 'Auditor soft-deleted permanently from active roster', auditorId: aud.id });
+  if (supabase) {
+    // 1. Delete associated attendance records first (if any)
+    await supabase.from('attendance').delete().eq('auditor_id', id);
+
+    // 2. Delete the auditor from Supabase
+    const { error } = await supabase.from('auditors').delete().eq('id', id);
+
+    if (error) {
+      console.error('Failed to delete from Supabase:', error.message);
+      return res.status(400).json({ error: error.message });
+    }
+
+    return res.json({ message: 'Auditor permanently deleted from Supabase', id });
+  }
+
+  res.json({ message: 'Auditor deleted locally', id });
 });
 
 // E. Dynamic Attendance Register
